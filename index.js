@@ -74,7 +74,7 @@ Cuentas straming
 
 `;
 
-const imagePath = '/root/pana-bot/log.png';
+const imagePath = 'imagen/img1.png';
 
 client.on('qr', (qr) => {
   qrcode.generate(qr, { small: true });
