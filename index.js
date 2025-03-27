@@ -28,13 +28,14 @@ async function startBot() {
 
     client.ev.on('creds.update', saveCreds);
 
-    client.ev.on('qr', (qr) => {
-      qrcode.generate(qr, { small: true });
-      console.log('Escanea el QR con tu WhatsApp');
-    });
-
+    // Mostrar el QR en la terminal cuando se genere
     client.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect } = update;
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        console.log("Escanea este código QR para conectar:");
+        qrcode.generate(qr, { small: true });
+      }
 
       if (connection === 'close') {
         const reason = lastDisconnect?.error?.output?.statusCode || 0;
@@ -106,7 +107,7 @@ async function startBot() {
       console.log(`Recibiendo mensaje privado de: ${message.key.remoteJid}`);
       await client.sendMessage(
         message.key.remoteJid,
-        { text: 'ESTE NÚMERO SOLO ES UN BOT《wa.me/4811515144》NUMERO OFICIAL Y GRACIAS POR SU PREFERENCIA' }
+        { text: 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO' }
       );
     });
 
