@@ -12,7 +12,7 @@ const imagePath = 'imagen/img1.png';
 const bannerFile = 'banner.txt';
 let banner = fs.existsSync(bannerFile) ? fs.readFileSync(bannerFile, 'utf-8') : 'TEXTO DEL BANNER AQUÍ';
 
-const owners = ['5214437913563', '5217152613752'];
+const owners = ['5214437913563', '5217152613752', '5217461632611'];
 
 let envioProgramadoIniciado = false;
 let intervaloEnvio = 3 * 60 * 60 * 1000;
@@ -110,7 +110,9 @@ async function startBot() {
       intervalId = setInterval(enviarMensajesGrupos, intervaloEnvio);
     }
 
-    client.ev.on('messages.upsert', async ({ messages }) => {
+    const actividadUsuarios = {};
+
+client.ev.on('messages.upsert', async ({ messages }) => {
       const message = messages[0];
       if (!message?.message || message.key.fromMe) return;
 
@@ -120,10 +122,59 @@ async function startBot() {
         ? message.key.participant.split('@')[0]
         : sender.split('@')[0];
 
+  // 🛡️ Protección anti-spam en privado
+  if (!isGroup && !owners.includes(senderNumber)) {
+    const ahora = Date.now();
+    const ventana = 30 * 1000; // 30 segundos
+    const limite = 5;
+
+    if (!actividadUsuarios[senderNumber]) {
+      actividadUsuarios[senderNumber] = [];
+    }
+
+    // Filtrar los mensajes recientes en la ventana
+    actividadUsuarios[senderNumber] = actividadUsuarios[senderNumber].filter(ts => ahora - ts < ventana);
+    actividadUsuarios[senderNumber].push(ahora);
+
+    if (actividadUsuarios[senderNumber].length > limite) {
+      await client.sendMessage(sender, {
+        text: '🚫 Has sido bloqueado por enviar demasiados mensajes seguidos.',
+      });
+
+      try {
+        await client.updateBlockStatus(sender, 'block');
+        console.log(`🔒 Usuario bloqueado por spam: ${senderNumber}`);
+      } catch (err) {
+        console.error(`❌ Error al bloquear ${senderNumber}:`, err);
+      }
+
+      return;
+    }
+  }
+
+
       const body = message.message.conversation ||
         message.message.extendedTextMessage?.text || '';
 
-      if (!owners.includes(senderNumber)) return;
+  // Si no es grupo y no es owner, enviar respuesta automática
+  if (!isGroup && !owners.includes(senderNumber)) {
+    let mensajePrivado = 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO';
+    if (fs.existsSync('privado.txt')) {
+      mensajePrivado = fs.readFileSync('privado.txt', 'utf-8');
+    }
+
+    try {
+      await client.sendMessage(sender, {
+        text: mensajePrivado,
+      });
+    } catch (err) {
+      console.error('Error al enviar respuesta automática:', err);
+    }
+
+    return; // Muy importante para que no siga evaluando comandos
+  }
+
+  if (!owners.includes(senderNumber)) return;
 
       if (body.startsWith('.setbanner')) {
         const nuevoBanner = body.slice(10).trim();
