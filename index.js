@@ -1,34 +1,47 @@
-const { 
-  makeWASocket, 
-  useMultiFileAuthState, 
-  fetchLatestBaileysVersion, 
-  DisconnectReason 
+
+const {
+  makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  DisconnectReason
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const imagePath = 'imagen/img1.png';
-const banner = `TEXTO DEL BANNER AQUÍ`;
+const bannerFile = 'banner.txt';
+let banner = fs.existsSync(bannerFile) ? fs.readFileSync(bannerFile, 'utf-8') : 'TEXTO DEL BANNER AQUÍ';
+
+const owners = ['5214437913563', '5217152613752'];
 
 let envioProgramadoIniciado = false;
+let intervaloEnvio = 3 * 60 * 60 * 1000;
+let intervalId = null;
+
+// Leer configuración desde config.json si existe
+if (fs.existsSync('config.json')) {
+  try {
+    const config = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
+    if (config.intervaloEnvioHoras && config.intervaloEnvioHoras > 0) {
+      intervaloEnvio = config.intervaloEnvioHoras * 60 * 60 * 1000;
+      console.log(`Intervalo de envío cargado: ${config.intervaloEnvioHoras} hora(s)`);
+    }
+  } catch (err) {
+    console.error('Error al leer config.json:', err);
+  }
+}
 
 async function startBot() {
   try {
-    console.log("Obteniendo la versión más reciente de Baileys...");
     const { version } = await fetchLatestBaileysVersion();
-
-    console.log("Cargando credenciales...");
     const { state, saveCreds } = await useMultiFileAuthState('./auth');
 
-    console.log("Iniciando el cliente de WhatsApp...");
-    const client = makeWASocket({
-      auth: state,
-      version
-    });
+    const client = makeWASocket({ auth: state, version });
 
     client.ev.on('creds.update', saveCreds);
 
-    // Mostrar el QR en la terminal cuando se genere
+    if (!fs.existsSync('imagen')) fs.mkdirSync('imagen');
+
     client.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
@@ -43,7 +56,7 @@ async function startBot() {
           console.log('Usuario desconectado. Cerrando...');
           process.exit(0);
         }
-        console.log('Conexión cerrada. Intentando reconectar en 5 segundos...');
+        console.log('Conexión cerrada. Intentando reconectar...');
         setTimeout(startBot, 5000);
       } else if (connection === 'open') {
         console.log('El bot está listo');
@@ -68,13 +81,11 @@ async function startBot() {
 
         try {
           media = await fs.promises.readFile(imagePath);
-          console.log("Imagen encontrada y lista para enviar.");
         } catch {
           console.log("No se encontró la imagen, solo se enviará texto.");
         }
 
         for (const chatId of groupChats) {
-          console.log(`Enviando mensaje al grupo: ${chatId}`);
           try {
             if (media) {
               await client.sendMessage(chatId, { image: media, caption: banner });
@@ -95,25 +106,128 @@ async function startBot() {
     function iniciarEnvioProgramado() {
       if (envioProgramadoIniciado) return;
       envioProgramadoIniciado = true;
-      console.log("Iniciando el envío programado de mensajes...");
       enviarMensajesGrupos();
-      setInterval(enviarMensajesGrupos, 3 * 60 * 60 * 1000);
+      intervalId = setInterval(enviarMensajesGrupos, intervaloEnvio);
     }
 
     client.ev.on('messages.upsert', async ({ messages }) => {
       const message = messages[0];
-      if (!message?.key?.remoteJid || message.key.remoteJid.includes('@g.us') || message.key.fromMe) return;
+      if (!message?.message || message.key.fromMe) return;
 
-      console.log(`Recibiendo mensaje privado de: ${message.key.remoteJid}`);
-      await client.sendMessage(
-        message.key.remoteJid,
-        { text: 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO' }
-      );
+      const sender = message.key.remoteJid;
+      const isGroup = sender.endsWith('@g.us');
+      const senderNumber = message.key.participant
+        ? message.key.participant.split('@')[0]
+        : sender.split('@')[0];
+
+      const body = message.message.conversation ||
+        message.message.extendedTextMessage?.text || '';
+
+      if (!owners.includes(senderNumber)) return;
+
+      if (body.startsWith('.setbanner')) {
+        const nuevoBanner = body.slice(10).trim();
+        if (!nuevoBanner) {
+          return await client.sendMessage(sender, {
+            text: '❌ Escribe el nuevo texto del banner. Ej: *.setbanner Bienvenidos al grupo*',
+          });
+        }
+        banner = nuevoBanner;
+        fs.writeFileSync(bannerFile, banner, 'utf-8');
+        return await client.sendMessage(sender, {
+          text: `✅ Banner actualizado:
+
+${banner}`,
+        });
+      }
+
+      if (body === '.banner') {
+        return await client.sendMessage(sender, {
+          text: `📢 Banner actual:
+
+${banner}`,
+        });
+      }
+
+      if (body === '.setimg') {
+        const context = message.message?.extendedTextMessage?.contextInfo;
+        const quoted = context?.quotedMessage;
+        const quotedKey = {
+          remoteJid: sender,
+          fromMe: false,
+          id: context?.stanzaId,
+          participant: context?.participant
+        };
+
+        if (!quoted || !quoted.imageMessage) {
+          return await client.sendMessage(sender, {
+            text: '❌ Debes responder a una imagen con el comando *.setimg*.',
+          });
+        }
+
+        try {
+          const imgBuffer = await client.downloadMediaMessage({
+            message: quoted,
+            key: quotedKey,
+          });
+
+          fs.writeFileSync(imagePath, imgBuffer);
+          return await client.sendMessage(sender, {
+            text: '✅ Imagen del banner actualizada correctamente.',
+          });
+        } catch (err) {
+          console.error(err);
+          return await client.sendMessage(sender, {
+            text: '❌ No se pudo guardar la imagen. Asegúrate de responder a una imagen válida y reciente.',
+          });
+        }
+      }
+
+      if (body.startsWith('.setprivado')) {
+        const nuevoPrivado = body.slice(12).trim();
+        if (!nuevoPrivado) {
+          return await client.sendMessage(sender, {
+            text: '❌ Escribe el nuevo mensaje. Ej: *.setprivado Hola, ¿cómo puedo ayudarte?*',
+          });
+        }
+        fs.writeFileSync('privado.txt', nuevoPrivado, 'utf-8');
+        return await client.sendMessage(sender, {
+          text: `✅ Mensaje privado actualizado:
+
+${nuevoPrivado}`,
+        });
+      }
+
+      if (body.startsWith('.setinterval')) {
+        const horas = parseInt(body.slice(12).trim());
+        if (isNaN(horas) || horas < 1) {
+          return await client.sendMessage(sender, {
+            text: '❌ Debes indicar un número válido de horas. Ej: *.setinterval 2*',
+          });
+        }
+        intervaloEnvio = horas * 60 * 60 * 1000;
+        fs.writeFileSync('config.json', JSON.stringify({ intervaloEnvioHoras: horas }, null, 2));
+        if (intervalId) clearInterval(intervalId);
+        intervalId = setInterval(enviarMensajesGrupos, intervaloEnvio);
+        return await client.sendMessage(sender, {
+          text: `✅ Intervalo actualizado. Ahora se enviará cada ${horas} hora(s).`,
+        });
+      }
+
+      if (!isGroup && !owners.includes(senderNumber)) {
+        let mensajePrivado = 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO';
+        if (fs.existsSync('privado.txt')) {
+          mensajePrivado = fs.readFileSync('privado.txt', 'utf-8');
+        }
+
+        await client.sendMessage(sender, {
+          text: mensajePrivado,
+        });
+      }
     });
 
   } catch (error) {
     console.error("Error al iniciar el bot:", error);
-    console.log("Reintentando en 10 segundos...");
     setTimeout(startBot, 10000);
   }
 }
