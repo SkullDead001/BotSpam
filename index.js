@@ -1,4 +1,3 @@
-
 const {
   makeWASocket,
   useMultiFileAuthState,
@@ -18,7 +17,25 @@ let envioProgramadoIniciado = false;
 let intervaloEnvio = 3 * 60 * 60 * 1000;
 let intervalId = null;
 
-// Leer configuración desde config.json si existe
+const gruposPermitidosFile = 'grupos_permitidos.json';
+let gruposPermitidos = [];
+
+if (fs.existsSync(gruposPermitidosFile)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(gruposPermitidosFile, 'utf-8'));
+    if (Array.isArray(data.permitidos)) {
+      gruposPermitidos = data.permitidos;
+    }
+  } catch (err) {
+    console.error('Error al leer grupos_permitidos.json:', err);
+  }
+}
+
+function guardarGruposPermitidos() {
+  fs.writeFileSync(gruposPermitidosFile, JSON.stringify({ permitidos: gruposPermitidos }, null, 2));
+}
+
+// Cargar intervalo desde config.json si existe
 if (fs.existsSync('config.json')) {
   try {
     const config = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
@@ -40,7 +57,9 @@ async function startBot() {
 
     client.ev.on('creds.update', saveCreds);
 
-    if (!fs.existsSync('imagen')) fs.mkdirSync('imagen');
+    if (!fs.existsSync('imagen')) {
+      fs.mkdirSync('imagen');
+    }
 
     client.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
@@ -77,6 +96,7 @@ async function startBot() {
     async function enviarMensajesGrupos() {
       try {
         const groupChats = await obtenerGrupos();
+        const gruposFiltrados = groupChats.filter(gid => gruposPermitidos.includes(gid));
         let media = null;
 
         try {
@@ -85,7 +105,7 @@ async function startBot() {
           console.log("No se encontró la imagen, solo se enviará texto.");
         }
 
-        for (const chatId of groupChats) {
+        for (const chatId of gruposFiltrados) {
           try {
             if (media) {
               await client.sendMessage(chatId, { image: media, caption: banner });
@@ -106,13 +126,12 @@ async function startBot() {
     function iniciarEnvioProgramado() {
       if (envioProgramadoIniciado) return;
       envioProgramadoIniciado = true;
-      enviarMensajesGrupos();
       intervalId = setInterval(enviarMensajesGrupos, intervaloEnvio);
     }
-
+    
     const actividadUsuarios = {};
 
-client.ev.on('messages.upsert', async ({ messages }) => {
+    client.ev.on('messages.upsert', async ({ messages }) => {
       const message = messages[0];
       if (!message?.message || message.key.fromMe) return;
 
@@ -122,59 +141,52 @@ client.ev.on('messages.upsert', async ({ messages }) => {
         ? message.key.participant.split('@')[0]
         : sender.split('@')[0];
 
-  // 🛡️ Protección anti-spam en privado
-  if (!isGroup && !owners.includes(senderNumber)) {
-    const ahora = Date.now();
-    const ventana = 30 * 1000; // 30 segundos
-    const limite = 5;
+      // Anti-spam en privado
+      if (!isGroup && !owners.includes(senderNumber)) {
+        const ahora = Date.now();
+        const ventana = 30 * 1000;
+        const limite = 5;
 
-    if (!actividadUsuarios[senderNumber]) {
-      actividadUsuarios[senderNumber] = [];
-    }
+        if (!actividadUsuarios[senderNumber]) {
+          actividadUsuarios[senderNumber] = [];
+        }
 
-    // Filtrar los mensajes recientes en la ventana
-    actividadUsuarios[senderNumber] = actividadUsuarios[senderNumber].filter(ts => ahora - ts < ventana);
-    actividadUsuarios[senderNumber].push(ahora);
+        actividadUsuarios[senderNumber] = actividadUsuarios[senderNumber].filter(ts => ahora - ts < ventana);
+        actividadUsuarios[senderNumber].push(ahora);
 
-    if (actividadUsuarios[senderNumber].length > limite) {
-      await client.sendMessage(sender, {
-        text: '🚫 Has sido bloqueado por enviar demasiados mensajes seguidos.',
-      });
+        if (actividadUsuarios[senderNumber].length > limite) {
+          await client.sendMessage(sender, {
+            text: '🚫 Has sido bloqueado por enviar demasiados mensajes seguidos.',
+          });
 
-      try {
-        await client.updateBlockStatus(sender, 'block');
-        console.log(`🔒 Usuario bloqueado por spam: ${senderNumber}`);
-      } catch (err) {
-        console.error(`❌ Error al bloquear ${senderNumber}:`, err);
+          try {
+            await client.updateBlockStatus(sender, 'block');
+            console.log(`🔒 Usuario bloqueado por spam: ${senderNumber}`);
+          } catch (err) {
+            console.error(`❌ Error al bloquear ${senderNumber}:`, err);
+          }
+
+          return;
+        }
       }
-
-      return;
-    }
-  }
-
 
       const body = message.message.conversation ||
         message.message.extendedTextMessage?.text || '';
 
-  // Si no es grupo y no es owner, enviar respuesta automática
-  if (!isGroup && !owners.includes(senderNumber)) {
-    let mensajePrivado = 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO';
-    if (fs.existsSync('privado.txt')) {
-      mensajePrivado = fs.readFileSync('privado.txt', 'utf-8');
-    }
+      if (!isGroup && !owners.includes(senderNumber)) {
+        let mensajePrivado = 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO';
+        if (fs.existsSync('privado.txt')) {
+          mensajePrivado = fs.readFileSync('privado.txt', 'utf-8');
+        }
 
-    try {
-      await client.sendMessage(sender, {
-        text: mensajePrivado,
-      });
-    } catch (err) {
-      console.error('Error al enviar respuesta automática:', err);
-    }
+        await client.sendMessage(sender, {
+          text: mensajePrivado,
+        });
 
-    return; // Muy importante para que no siga evaluando comandos
-  }
+        return;
+      }
 
-  if (!owners.includes(senderNumber)) return;
+      if (!owners.includes(senderNumber)) return;
 
       if (body.startsWith('.setbanner')) {
         const nuevoBanner = body.slice(10).trim();
@@ -186,17 +198,72 @@ client.ev.on('messages.upsert', async ({ messages }) => {
         banner = nuevoBanner;
         fs.writeFileSync(bannerFile, banner, 'utf-8');
         return await client.sendMessage(sender, {
-          text: `✅ Banner actualizado:
-
-${banner}`,
+          text: `✅ Banner actualizado:\n\n${banner}`,
         });
       }
 
       if (body === '.banner') {
-        return await client.sendMessage(sender, {
-          text: `📢 Banner actual:
+        let media = null;
+        try {
+          media = await fs.promises.readFile(imagePath);
+        } catch {
+          media = null;
+        }
 
-${banner}`,
+        if (media) {
+          return await client.sendMessage(sender, {
+            image: media,
+            caption: `📢 Banner actual:\n\n${banner}`,
+          });
+        } else {
+          return await client.sendMessage(sender, {
+            text: `📢 Banner actual (sin imagen):\n\n${banner}`,
+          });
+        }
+      }
+
+      if (body === '.listgrupos') {
+        const grupos = await client.groupFetchAllParticipating();
+        const nombres = Object.values(grupos)
+          .map(g => `${g.subject} → ${g.id}`)
+          .join('\n');
+
+        return await client.sendMessage(sender, {
+          text: `📋 Lista de grupos donde estoy:\n\n${nombres}`
+        });
+      }
+      
+      if (body.startsWith('.addgrupo')) {
+        const nombre = body.slice(9).trim().toLowerCase();
+        const grupos = await client.groupFetchAllParticipating();
+        const grupo = Object.values(grupos).find(g => g.subject.toLowerCase().includes(nombre));
+        if (!grupo) {
+          return await client.sendMessage(sender, {
+            text: '❌ Grupo no encontrado. Usa *.listgrupos* para ver nombres exactos.',
+          });
+        }
+        if (!gruposPermitidos.includes(grupo.id)) {
+          gruposPermitidos.push(grupo.id);
+          guardarGruposPermitidos();
+        }
+        return await client.sendMessage(sender, {
+          text: `✅ Grupo "${grupo.subject}" agregado a la lista de envío.`,
+        });
+      }
+
+      if (body.startsWith('.delgrupo')) {
+        const nombre = body.slice(9).trim().toLowerCase();
+        const grupos = await client.groupFetchAllParticipating();
+        const grupo = Object.values(grupos).find(g => g.subject.toLowerCase().includes(nombre));
+        if (!grupo) {
+          return await client.sendMessage(sender, {
+            text: '❌ Grupo no encontrado. Usa *.listgrupos* para ver nombres exactos.',
+          });
+        }
+        gruposPermitidos = gruposPermitidos.filter(gid => gid !== grupo.id);
+        guardarGruposPermitidos();
+        return await client.sendMessage(sender, {
+          text: `✅ Grupo "${grupo.subject}" eliminado de la lista de envío.`,
         });
       }
 
@@ -243,9 +310,7 @@ ${banner}`,
         }
         fs.writeFileSync('privado.txt', nuevoPrivado, 'utf-8');
         return await client.sendMessage(sender, {
-          text: `✅ Mensaje privado actualizado:
-
-${nuevoPrivado}`,
+          text: `✅ Mensaje privado actualizado:\n\n${nuevoPrivado}`,
         });
       }
 
@@ -264,19 +329,7 @@ ${nuevoPrivado}`,
           text: `✅ Intervalo actualizado. Ahora se enviará cada ${horas} hora(s).`,
         });
       }
-
-      if (!isGroup && !owners.includes(senderNumber)) {
-        let mensajePrivado = 'AQUI VA EL MENSAJE EN CASO DE QUE LE ESCRIBAN AL PRIVADO';
-        if (fs.existsSync('privado.txt')) {
-          mensajePrivado = fs.readFileSync('privado.txt', 'utf-8');
-        }
-
-        await client.sendMessage(sender, {
-          text: mensajePrivado,
-        });
-      }
     });
-
   } catch (error) {
     console.error("Error al iniciar el bot:", error);
     setTimeout(startBot, 10000);
