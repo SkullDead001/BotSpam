@@ -12,7 +12,7 @@ const imagePath = 'imagen/img1.png';
 const bannerFile = 'banner.txt';
 let banner = fs.existsSync(bannerFile) ? fs.readFileSync(bannerFile, 'utf-8') : 'TEXTO DEL BANNER AQUÍ';
 
-const owners = ['5214437913563', '5217152613752', '5217461632611'];
+const owners = ['5217152613752'];
 
 let envioProgramadoIniciado = false;
 let intervaloEnvio = 3 * 60 * 60 * 1000;
