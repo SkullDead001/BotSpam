@@ -2,7 +2,8 @@ const {
   makeWASocket,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
-  DisconnectReason
+  DisconnectReason,
+downloadMediaMessage
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
@@ -108,7 +109,21 @@ async function startBot() {
         for (const chatId of gruposFiltrados) {
           try {
             if (media) {
-              await client.sendMessage(chatId, { image: media, caption: banner });
+              
+        const mensajes = await client.loadMessages(chatId, 5);
+        const ultimo = mensajes[mensajes.length - 1];
+
+        if (ultimo && ultimo.key.fromMe) {
+          const textoUltimo = ultimo.message?.conversation ||
+            ultimo.message?.extendedTextMessage?.text ||
+            ultimo.message?.imageMessage?.caption || '';
+
+          if (textoUltimo.trim() === banner.trim()) {
+            console.log(`⏭️ Ya se envió el banner recientemente en ${chatId}, se omite.`);
+            continue;
+          }
+        }
+await client.sendMessage(chatId, { image: media, caption: banner });
             } else {
               await client.sendMessage(chatId, { text: banner });
             }
@@ -284,10 +299,15 @@ async function startBot() {
         }
 
         try {
-          const imgBuffer = await client.downloadMediaMessage({
-            message: quoted,
-            key: quotedKey,
-          });
+          const imgBuffer = await downloadMediaMessage(
+  { message: quoted, key: quotedKey },
+  'buffer',
+  {},
+  {
+    logger: console,
+    reuploadRequest: client.updateMediaMessage,
+  }
+);
 
           fs.writeFileSync(imagePath, imgBuffer);
           return await client.sendMessage(sender, {
