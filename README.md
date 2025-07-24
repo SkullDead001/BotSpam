@@ -28,7 +28,7 @@ para ofrecer tus servicios o tus productos, incluye unos pequeños comandos y so
 
 ¡OJO! EL BOT NO ENVIARA EL SPAM, HASTA QUE DESIGNES LOS GRUPOS AL CUAL ENVIARA EL BANNER.
 
-NOTA: El bot revisra los últimos 3 mensajes antes de enviar el banner y en caso de que el grupo este algo apagado y vea si banner, no enviara de nuevo el banner para evotar el spam.
+NOTA: El bot revisra los últimos 3 mensajes antes de enviar el banner y en caso de que el grupo este algo apagado y vea su banner, no enviara de nuevo el banner para evotar el spam.
 
 NOTA EXTRA: Si alguien le escribe muchos en 30 segundo, lo detectara como sospechoso y lo bloqueará automáticamente.
 𝗕𝘆 𝗗𝗲𝗮𝗱𝗦𝗸𝘂𝗹𝗹
